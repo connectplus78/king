@@ -1,64 +1,60 @@
 import os
-import json
 import requests
 import concurrent.futures
-import shutil
 
-def get_league_urls(page_url, league_name, org_id):
-    urls_to_fetch = []
-    try:
-        response = requests.get(page_url, timeout=20, headers={'User-Agent': 'Mozilla/5.0'})
-        response.raise_for_status()
-        import re
-        match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', response.text, re.DOTALL)
-        if not match: return []
-        data = json.loads(match.group(1))
-        highlights_data = data.get("props", {}).get("pageProps", {}).get("initialReduxState", {}).get("highlights", {}).get("data", [])
-        
-        for league_info in highlights_data:
-            if league_info.get("id") == org_id:
-                for season in league_info.get("seasons", []):
-                    season_name = season.get("name").replace('/', '-')
-                    file_name = f"{league_name}_{season_name}.m3u"
-                    for round_info in season.get("rounds", []):
-                        url = f"https://beinsports.com.tr/api/highlights/events?sp=1&o={org_id}&s={season.get('id')}&r={round_info.get('round')}&st={round_info.get('st', 0)}"
-                        urls_to_fetch.append((url, file_name))
-        return urls_to_fetch
-    except Exception as e:
-        print(f"Hata: {e}")
-        return []
+# Premier Lig için ID'ler ve sezonlar (Süper Lig tarzı manuel garanti)
+premier_sezonlar = {
+    3950: '2025-2026',
+    3792: '2024-2025',
+    3613: '2023-2024',
+    3466: '2022-2023'
+}
 
 def fetch_and_parse(url_info):
-    url, file_name = url_info
+    url, group_title = url_info
     try:
-        response = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
+        response = requests.get(url, timeout=15, headers={'User-Agent': 'Mozilla/5.0'})
         data = response.json()
         events = data.get('Data', {}).get('events', [])
         result = []
         for event in events:
             video_url = event.get('highlightVideoUrl')
             if video_url:
-                title = f"{event.get('homeTeam',{}).get('name')} {event.get('homeTeam',{}).get('matchScore')} - {event.get('awayTeam',{}).get('matchScore')} {event.get('awayTeam',{}).get('name')}"
-                result.append((file_name, f"#EXTINF:-1,{title}\n{video_url}\n"))
+                title = f"{event.get('homeTeam',{}).get('name')} {event.get('homeTeam',{}).get('matchScore')}-{event.get('awayTeam',{}).get('matchScore')} {event.get('awayTeam',{}).get('name')}"
+                line1 = f'#EXTINF:-1 group-title="{group_title}",{title}\n'
+                line2 = f"{video_url}\n"
+                result.append((group_title, line1, line2))
         return result
     except: return []
 
 def main():
     output_folder = 'metv'
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
-        print("Klasör oluşturuldu.")
+    os.makedirs(output_folder, exist_ok=True)
     
-    urls = get_league_urls("https://www.beinsports.com.tr/mac-ozetleri-goller/ingiltere-premier-ligi", "Premier_Lig", 135)
+    all_urls = []
+    # Premier Lig (org_id: 135)
+    for s_id, s_adi in premier_sezonlar.items():
+        group_title = f"Premier_Lig_{s_adi}"
+        # Sezon içindeki haftaları dolaş (1'den 38'e kadar)
+        for hafta in range(1, 39):
+            url = f"https://www.beinsports.com.tr/api/highlights/events?sp=1&o=135&s={s_id}&r={hafta}&st=0"
+            all_urls.append((url, group_title))
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        results = executor.map(fetch_and_parse, urls)
-        for result_list in results:
-            for file_name, content in result_list:
-                with open(os.path.join(output_folder, file_name), 'a', encoding='utf-8') as f:
-                    if f.tell() == 0: f.write("#EXTM3U\n\n")
-                    f.write(content)
-    print("İşlem tamamlandı, dosyalar oluşturuldu.")
+    grouped_results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        for result_list in executor.map(fetch_and_parse, all_urls):
+            for group_title, line1, line2 in result_list:
+                grouped_results.setdefault(group_title, []).append((line1, line2))
+
+    # Süper Lig kodundaki gibi klasörle ve yaz
+    for group_title, lines in grouped_results.items():
+        folder_path = os.path.join(output_folder, group_title)
+        os.makedirs(folder_path, exist_ok=True)
+        file_path = os.path.join(folder_path, f"{group_title}.m3u")
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write("#EXTM3U\n\n")
+            for line1, line2 in lines:
+                f.write(line1 + line2)
 
 if __name__ == "__main__":
     main()
