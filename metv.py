@@ -26,7 +26,7 @@ def get_league_urls(page_url, league_name, org_id):
                         st_code = round_info.get("st", 0)
                         if season_id and round_number:
                             url = f"https://beinsports.com.tr/api/highlights/events?sp=1&o={org_id}&s={season_id}&r={round_number}&st={st_code}"
-                            urls_to_fetch.append((url, f"{league_name} {season_name}"))
+                            urls_to_fetch.append((url, f"{league_name}_{season_name}"))
         return urls_to_fetch
     except Exception as e:
         print(f"Hata oluştu: {e}")
@@ -59,10 +59,15 @@ def fetch_and_parse(url_info):
 
 def main():
     output_folder = 'metv'
-    os.makedirs(output_folder, exist_ok=True)
+    # Klasörü temizle veya yeniden oluştur
+    if os.path.exists(output_folder):
+        for f in os.listdir(output_folder):
+            os.remove(os.path.join(output_folder, f))
+    else:
+        os.makedirs(output_folder, exist_ok=True)
     
-    # Sadece Premier Lig URL'sini ekliyoruz
-    all_urls_to_fetch = get_league_urls("https://www.beinsports.com.tr/mac-ozetleri-goller/ingiltere-premier-ligi", "Premier Lig", 135)
+    # Premier Lig URL'sini ekliyoruz
+    all_urls_to_fetch = get_league_urls("https://www.beinsports.com.tr/mac-ozetleri-goller/ingiltere-premier-ligi", "Premier_Lig", 135)
 
     grouped_results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
@@ -72,10 +77,7 @@ def main():
                 grouped_results.setdefault(group_title, []).append((line1, line2))
 
     for group_title, lines in sorted(grouped_results.items()):
-        safe_folder_name = group_title.replace('/', '-').replace(' ', '_')
-        folder_path = os.path.join(output_folder, safe_folder_name)
-        os.makedirs(folder_path, exist_ok=True)
-        file_path = os.path.join(folder_path, f"{safe_folder_name}.m3u")
+        file_path = os.path.join(output_folder, f"{group_title}.m3u")
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write("#EXTM3U\n\n")
             for line1, line2 in lines:
